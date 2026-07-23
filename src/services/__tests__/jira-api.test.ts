@@ -218,12 +218,32 @@ describe("JiraApiService", () => {
         ],
       };
 
-      const mockFetch1 = async () => new Response(JSON.stringify(mockResponse));
+      const requestedUrls: string[] = [];
+      const mockFetch1 = async (input: RequestInfo | URL) => {
+        const url = input.toString();
+        requestedUrls.push(url);
+        if (url.includes("/search/approximate-count")) {
+          return new Response(JSON.stringify({ count: mockResponse.total }));
+        }
+        // Enhanced JQL search endpoint (replaces the removed /search endpoint).
+        return new Response(JSON.stringify({ issues: mockResponse.issues }));
+      };
       mockFetch1.preconnect = async () => {}; // Add dummy preconnect
       global.fetch = mockFetch1;
 
       const result = await service.searchIssues("project = TEST");
       expect(result).toEqual(expectedResponse);
+      // Verify the migrated endpoints are used.
+      expect(
+        requestedUrls.some((u) => u.includes("/rest/api/3/search/jql")),
+      ).toBe(true);
+      expect(
+        requestedUrls.some((u) =>
+          u.includes("/rest/api/3/search/approximate-count"),
+        ),
+      ).toBe(true);
+      // The removed classic search endpoint must not be used.
+      expect(requestedUrls.some((u) => /\/search\?/.test(u))).toBe(false);
     });
 
     test("should handle error responses", async () => {

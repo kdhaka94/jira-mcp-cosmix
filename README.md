@@ -254,6 +254,8 @@ Input Schema:
 - Uses Bun runtime for improved performance
 - Vite for optimized builds
 - Uses JIRA REST API v3 (Cloud) or v2 (Server/Data Center)
+- Jira Cloud search uses the enhanced JQL search endpoint (`/rest/api/3/search/jql`), which replaced the removed `/rest/api/3/search` endpoint. Result counts are retrieved via `/rest/api/3/search/approximate-count`.
+- Jira Server/Data Center continues to use the classic `/rest/api/2/search` endpoint, which is unaffected by the Jira Cloud deprecation.
 - Supports multiple authentication methods:
   - Basic authentication with API tokens or username/password
   - Bearer authentication with Personal Access Tokens (PATs)

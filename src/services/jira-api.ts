@@ -11,6 +11,24 @@ export class JiraApiService {
   protected baseUrl: string;
   protected headers: Headers;
 
+  /**
+   * Issue fields requested from the search and issue-detail endpoints.
+   * Shared so every request asks for the same, minimal payload.
+   */
+  protected readonly issueFields = [
+    "id",
+    "key",
+    "summary",
+    "description",
+    "status",
+    "created",
+    "updated",
+    "parent",
+    "subtasks",
+    "customfield_10014",
+    "issuelinks",
+  ];
+
   constructor(baseUrl: string, email: string, apiToken: string, authType: 'basic' | 'bearer' = 'basic') {
     this.baseUrl = baseUrl;
     
@@ -244,58 +262,71 @@ export class JiraApiService {
     return response.json();
   }
 
-  async searchIssues(searchString: string): Promise<SearchIssuesResponse> {
+  /**
+   * Runs a JQL search against the enhanced search endpoint
+   * (GET /rest/api/3/search/jql). This replaced the removed
+   * GET/POST /rest/api/3/search endpoint on Jira Cloud. Pagination is
+   * token based (nextPageToken) and the response no longer carries a
+   * total count.
+   */
+  protected async searchJql(
+    jql: string,
+    maxResults: number
+  ): Promise<{ issues: any[]; nextPageToken?: string; isLast?: boolean }> {
     const params = new URLSearchParams({
-      jql: searchString,
-      maxResults: "50",
-      fields: [
-        "id",
-        "key",
-        "summary",
-        "description",
-        "status",
-        "created",
-        "updated",
-        "parent",
-        "subtasks",
-        "customfield_10014",
-        "issuelinks",
-      ].join(","),
-      expand: "names,renderedFields",
+      jql,
+      maxResults: String(maxResults),
+      fields: this.issueFields.join(","),
     });
 
-    const data = await this.fetchJson<any>(`/rest/api/3/search?${params}`);
+    const data = await this.fetchJson<any>(`/rest/api/3/search/jql?${params}`);
 
     return {
-      total: data.total,
-      issues: data.issues.map((issue: any) => this.cleanIssue(issue)),
+      issues: data.issues ?? [],
+      nextPageToken: data.nextPageToken,
+      isLast: data.isLast,
+    };
+  }
+
+  /**
+   * Returns an approximate total issue count for a JQL query using
+   * POST /rest/api/3/search/approximate-count. The enhanced search
+   * endpoint no longer returns a total, so this is the supported way to
+   * obtain a count. Failures are non-fatal and resolve to 0.
+   */
+  protected async getApproximateCount(jql: string): Promise<number> {
+    try {
+      const data = await this.fetchJson<{ count?: number }>(
+        `/rest/api/3/search/approximate-count`,
+        {
+          method: "POST",
+          body: JSON.stringify({ jql }),
+        }
+      );
+      return data.count ?? 0;
+    } catch (error) {
+      console.error("Failed to fetch approximate issue count:", error);
+      return 0;
+    }
+  }
+
+  async searchIssues(searchString: string): Promise<SearchIssuesResponse> {
+    const [page, total] = await Promise.all([
+      this.searchJql(searchString, 50),
+      this.getApproximateCount(searchString),
+    ]);
+
+    return {
+      total,
+      issues: page.issues.map((issue: any) => this.cleanIssue(issue)),
     };
   }
 
   async getEpicChildren(epicKey: string): Promise<CleanJiraIssue[]> {
-    const params = new URLSearchParams({
-      jql: `"Epic Link" = ${epicKey}`,
-      maxResults: "100",
-      fields: [
-        "id",
-        "key",
-        "summary",
-        "description",
-        "status",
-        "created",
-        "updated",
-        "parent",
-        "subtasks",
-        "customfield_10014",
-        "issuelinks",
-      ].join(","),
-      expand: "names,renderedFields",
-    });
-
-    const data = await this.fetchJson<any>(`/rest/api/3/search?${params}`);
+    const { issues } = await this.searchJql(`"Epic Link" = ${epicKey}`, 100);
 
     const issuesWithComments = await Promise.all(
-      data.issues.map(async (issue: any) => {
+      issues.map(async (issue: any) => {
         const commentsData = await this.fetchJson<any>(
           `/rest/api/3/issue/${issue.key}/comment`
         );
@@ -322,19 +353,7 @@ export class JiraApiService {
 
   async getIssueWithComments(issueId: string): Promise<CleanJiraIssue> {
     const params = new URLSearchParams({
-      fields: [
-        "id",
-        "key",
-        "summary",
-        "description",
-        "status",
-        "created",
-        "updated",
-        "parent",
-        "subtasks",
-        "customfield_10014",
-        "issuelinks",
-      ].join(","),
+      fields: this.issueFields.join(","),
       expand: "names,renderedFields",
     });
 
