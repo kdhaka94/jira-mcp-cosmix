@@ -141,9 +141,7 @@ export class JiraApiService {
     created: string;
     updated: string;
   }): CleanComment {
-    const body = comment.body?.content
-      ? this.extractTextContent(comment.body.content)
-      : "";
+    const body = this.parseBody(comment.body);
     const mentions = comment.body?.content
       ? this.extractIssueMentions(comment.body.content, "comment", comment.id)
       : [];
@@ -177,10 +175,40 @@ export class JiraApiService {
       .join("");
   }
 
+  /**
+   * Extracts plain text from a comment/description body. Jira Cloud (v3)
+   * returns rich text as an ADF document ({ content: [...] }); Jira
+   * Server/Data Center (v2) returns it as a plain string. Handles both.
+   */
+  protected parseBody(body: unknown): string {
+    if (typeof body === "string") {
+      return body;
+    }
+    const content = (body as { content?: any[] } | undefined)?.content;
+    return content ? this.extractTextContent(content) : "";
+  }
+
+  /**
+   * Formats plain text for a write payload (comment body, issue
+   * description). Jira Cloud (v3) requires an ADF document; Jira
+   * Server/Data Center (v2) expects a plain string and overrides this.
+   */
+  protected formatBody(text: string): AdfDoc | string {
+    return this.createAdfFromBody(text);
+  }
+
+  /**
+   * JQL used to fetch an epic's child issues. Jira Cloud uses the unified
+   * `parent` field, which replaces the deprecated "Epic Link" field and
+   * covers both team-managed and company-managed projects. Server/Data
+   * Center overrides this to use the classic "Epic Link" clause.
+   */
+  protected epicChildrenJql(epicKey: string): string {
+    return `parent = ${epicKey}`;
+  }
+
   protected cleanIssue(issue: any): CleanJiraIssue {
-    const description = issue.fields?.description?.content
-      ? this.extractTextContent(issue.fields.description.content)
-      : "";
+    const description = this.parseBody(issue.fields?.description);
 
     const cleanedIssue: CleanJiraIssue = {
       id: issue.id,
@@ -323,7 +351,7 @@ export class JiraApiService {
   }
 
   async getEpicChildren(epicKey: string): Promise<CleanJiraIssue[]> {
-    const { issues } = await this.searchJql(`"Epic Link" = ${epicKey}`, 100);
+    const { issues } = await this.searchJql(this.epicChildrenJql(epicKey), 100);
 
     const issuesWithComments = await Promise.all(
       issues.map(async (issue: any) => {
@@ -413,7 +441,7 @@ export class JiraApiService {
         issuetype: {
           name: issueType,
         },
-        ...(description && { description }),
+        ...(description && { description: this.formatBody(description) }),
         ...fields,
       },
     };
@@ -454,27 +482,7 @@ export class JiraApiService {
 
     if (comment) {
       payload.update = {
-        comment: [
-          {
-            add: {
-              body: {
-                type: "doc",
-                version: 1,
-                content: [
-                  {
-                    type: "paragraph",
-                    content: [
-                      {
-                        type: "text",
-                        text: comment,
-                      },
-                    ],
-                  },
-                ],
-              },
-            },
-          },
-        ],
+        comment: [{ add: { body: this.formatBody(comment) } }],
       };
     }
 
@@ -490,7 +498,10 @@ export class JiraApiService {
     filename: string
   ): Promise<{ id: string; filename: string }> {
     const formData = new FormData();
-    formData.append("file", new Blob([file]), filename);
+    // Wrap in a fresh Uint8Array so the Blob part is backed by a plain
+    // ArrayBuffer (Node's Buffer can be ArrayBufferLike, which newer
+    // @types/node no longer accepts directly as a BlobPart).
+    formData.append("file", new Blob([new Uint8Array(file)]), filename);
 
     const headers = new Headers(this.headers);
     headers.delete("Content-Type");
@@ -546,10 +557,8 @@ export class JiraApiService {
     issueIdOrKey: string,
     body: string
   ): Promise<AddCommentResponse> {
-    const adfBody = this.createAdfFromBody(body);
-
     const payload = {
-      body: adfBody,
+      body: this.formatBody(body),
     };
 
     const response = await this.fetchJson<JiraCommentResponse>(
@@ -565,7 +574,7 @@ export class JiraApiService {
       author: response.author.displayName,
       created: response.created,
       updated: response.updated,
-      body: this.extractTextContent(response.body.content),
+      body: this.parseBody(response.body),
     };
   }
 }

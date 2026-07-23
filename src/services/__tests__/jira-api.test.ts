@@ -622,6 +622,69 @@ describe("JiraApiService", () => {
     });
   });
 
+  describe("createIssue", () => {
+    test("sends the description as an ADF document (Cloud v3)", async () => {
+      let sentPayload: any;
+      const mockFetch = async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = input.toString();
+        expect(url).toBe(`${baseUrl}/rest/api/3/issue`);
+        expect(init?.method).toBe("POST");
+        sentPayload = JSON.parse(init?.body as string);
+        return new Response(JSON.stringify({ id: "1000", key: "TEST-100" }), {
+          status: 201,
+        });
+      };
+      mockFetch.preconnect = async () => {};
+      global.fetch = mockFetch;
+
+      const result = await service.createIssue(
+        "TEST",
+        "Task",
+        "My summary",
+        "A plain description",
+      );
+
+      expect(result).toEqual({ id: "1000", key: "TEST-100" });
+      expect(sentPayload.fields.description).toEqual({
+        version: 1,
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "A plain description" }],
+          },
+        ],
+      });
+    });
+  });
+
+  describe("getEpicChildren JQL", () => {
+    test("queries the parent field on Cloud, not the deprecated Epic Link", async () => {
+      const requestedUrls: string[] = [];
+      const mockFetch = async (input: RequestInfo | URL) => {
+        const url = input.toString();
+        requestedUrls.push(url);
+        if (url.includes("/comment")) {
+          return new Response(JSON.stringify({ comments: [] }));
+        }
+        return new Response(JSON.stringify({ issues: [] }));
+      };
+      mockFetch.preconnect = async () => {};
+      global.fetch = mockFetch;
+
+      await service.getEpicChildren("TEST-1");
+
+      const searchUrl = requestedUrls.find((u) => u.includes("/search/jql"));
+      expect(searchUrl).toBeDefined();
+      expect(new URL(searchUrl!).searchParams.get("jql")).toBe(
+        "parent = TEST-1",
+      );
+    });
+  });
+
   describe("addCommentToIssue", () => {
     const issueIdOrKey = "TEST-10";
     const commentBody = "This is a new comment.";

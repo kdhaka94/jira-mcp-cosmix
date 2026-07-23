@@ -256,6 +256,8 @@ Input Schema:
 - Uses JIRA REST API v3 (Cloud) or v2 (Server/Data Center)
 - Jira Cloud search uses the enhanced JQL search endpoint (`/rest/api/3/search/jql`), which replaced the removed `/rest/api/3/search` endpoint. Result counts are retrieved via `/rest/api/3/search/approximate-count`.
 - Jira Server/Data Center continues to use the classic `/rest/api/2/search` endpoint, which is unaffected by the Jira Cloud deprecation.
+- Rich-text bodies (issue descriptions, comments, transition comments) are sent as Atlassian Document Format (ADF) on Jira Cloud (v3) and as plain text on Jira Server/Data Center (v2), and are parsed back correctly for either shape.
+- Epic children are fetched via the unified `parent` field on Jira Cloud (which replaces the deprecated `Epic Link` field and covers team-managed projects) and via the classic `"Epic Link"` clause on Jira Server/Data Center.
 - Supports multiple authentication methods:
   - Basic authentication with API tokens or username/password
   - Bearer authentication with Personal Access Tokens (PATs)

@@ -59,4 +59,19 @@ export class JiraServerApiService extends JiraApiService {
       return 0;
     }
   }
+
+  // Jira Server/Data Center (v2 REST) uses plain text / wiki markup for
+  // comment and description bodies, not the ADF documents used by Jira
+  // Cloud (v3). Send the raw string on writes; the inherited parseBody
+  // already reads string bodies back correctly.
+  protected formatBody(text: string): string {
+    return text;
+  }
+
+  // Server/Data Center still uses the classic "Epic Link" field to relate
+  // child issues to an epic; the Cloud `parent`-field replacement does not
+  // apply here (on DC, `parent` refers to sub-task parents).
+  protected epicChildrenJql(epicKey: string): string {
+    return `"Epic Link" = ${epicKey}`;
+  }
 }
